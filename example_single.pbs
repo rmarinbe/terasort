@@ -1,0 +1,27 @@
+#Example submission script for lab3
+#PBS -N lab3_single
+#PBS -l nodes=1:ppn=16:core24
+#PBS -l walltime=00:20:00
+#PBS -q coc-ice
+#PBS -j oe
+#PBS -o job.$PBS_JOBID.out
+#PBS -e job.$PBS_JOBID.err
+
+#Setup Environment
+cd $PBS_O_WORKDIR
+source pace_env.sh
+
+make teragen terametrics
+
+if [ ! -e data_bench.dat ]
+then
+    echo "* Creating datafile"
+    mpirun ./teragen -c 10000 -f data_bench.dat
+    sleep 10
+else
+    echo "* Reusing existing data file"
+fi
+
+mpirun ./terametrics -f data_bench.dat -c 20
+
+exit 0
