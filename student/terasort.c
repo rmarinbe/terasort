@@ -152,53 +152,18 @@ void terasort_bucket(terarec_t *local_data, int  local_len,
     free(recv_displs);
 }
 
-typedef struct{
-	char key[TERA_KEY_LEN + 1];
-} terakey_t;
-
-
-MPI_Datatype mpi_terakey_type;
-
-int teraKeyCompare(const void *a, const void *b){
-	return memcmp( ((terakey_t*) a)->key, ((terakey_t*) b)->key, TERA_KEY_LEN);
-}
-
-int teraRecKeyCompare(const void *a, const void *b){
-	return memcmp( ((terarec_t*) a)->key, ((terakey_t*) b)->key, TERA_KEY_LEN);
-}
-
-void partition_with_splitters(terarec_t *data, int  dat_len, terakey_t *splitters, int spl_len, int *bkt_counts, int *bkt_displs, int procs) {
+void partition_with_splitters(terarec_t *data, int  dat_len, terarec_t *splitters, int spl_len, int *bkt_counts, int *bkt_displs, int procs) {
 
     int k = 0; // track the splitter num
     bkt_displs[0] = 0;
 
     for (int i = 0; i < dat_len; i++) {
-        while(teraRecKeyCompare(data+i, splitters+k) >= 0 && k < spl_len) {
+        while(teraCompare(data+i, splitters+k) >= 0 && k < spl_len) {
             ++k;
             bkt_displs[k] = i;
         }
         ++bkt_counts[k];
     }
-}
-
-
-
-void terakeyMPICommitType(){
-	static int committed = 0;
-
-	if(committed)
-		return;
-
-    int blocklengths[1] = {TERA_KEY_LEN+1};
-    MPI_Datatype types[1] = {MPI_CHAR};
-
-    MPI_Aint     offsets[1];
-    offsets[0] = offsetof(terakey_t, key);
-
-    MPI_Type_create_struct(1, blocklengths, offsets, types, &mpi_terakey_type);
-    MPI_Type_commit(&mpi_terakey_type);
-
-    committed = 1;
 }
 
 
@@ -211,7 +176,6 @@ void terasort(terarec_t *local_data, int  local_len,
     
     MPI_Comm_size (MPI_COMM_WORLD, &P);
     MPI_Comm_rank (MPI_COMM_WORLD, &rank);
-	terakeyMPICommitType();
     
     int s = P-1; // sample, splitters
     int d = local_len/P;
@@ -220,29 +184,20 @@ void terasort(terarec_t *local_data, int  local_len,
     if(d==0) d = 1;
     
     terarec_t *local_samples = (terarec_t*) malloc(s*sizeof(terarec_t));
-    terakey_t *keys_samples = (terakey_t*) malloc(s*sizeof(terakey_t));
-    terakey_t *splitters = (terakey_t*) malloc(s*sizeof(terakey_t));
-    terakey_t *root_samples = NULL;
+    terarec_t *splitters = (terarec_t*) malloc(s*sizeof(terarec_t));
+    terarec_t *root_samples = NULL;
     int *all_counts = (int*) calloc( P * P, sizeof(int));
     int *send_displs = (int*) malloc(P * sizeof(int));
     int *recv_counts = (int*) calloc(P, sizeof(int));
     int *recv_displs = (int*) malloc(P * sizeof(int));
 
-    if(rank == 0) root_samples = (terakey_t*) malloc(P*s*sizeof(terakey_t));
+    if(rank == 0) root_samples = (terarec_t*) malloc(P*s*sizeof(terarec_t));
     // 1. Local Sort
     start = MPI_Wtime();
 	qsort(local_data, local_len, sizeof(terarec_t), teraCompare);
     end = MPI_Wtime();
     if(rank ==0) printf("%.6fs.| 1.  Local Sort\n", end - start);
 
-
-    start = MPI_Wtime();
-    if(rank==0)
-    for (int i = 0; i < s; i++) {
-        strcpy(keys_samples[i].key, local_data[(i+1)*d].key);
-    }
-    end = MPI_Wtime();
-    if(rank ==0) printf("%.6fs.| a.  keys samples\n", end - start);
     // 2. Select P-1 samples (s)
     start = MPI_Wtime();
     for (int i = 0; i < s; i++)
@@ -251,14 +206,13 @@ void terasort(terarec_t *local_data, int  local_len,
     if(rank ==0) printf("%.6fs.| 2.  Select P-1 samples\n", end - start);
     // 3. Gather samples at root 
     start = MPI_Wtime();
-	//MPI_Gather(local_samples, s, mpi_tera_type, root_samples, s, mpi_tera_type, 0, MPI_COMM_WORLD);
-	MPI_Gather(keys_samples, s, mpi_terakey_type, root_samples, s, mpi_terakey_type, 0, MPI_COMM_WORLD);
+	MPI_Gather(local_samples, s, mpi_tera_type, root_samples, s, mpi_tera_type, 0, MPI_COMM_WORLD);
     end = MPI_Wtime();
     if(rank ==0) printf("%.6fs.| 3.  Gather Samples at root\n", end - start);
     // 4. Sort samples at root and select splitters
     if(rank == 0) { 
         start = MPI_Wtime();
-        qsort(root_samples, P*s, sizeof(terakey_t), teraKeyCompare);
+        qsort(root_samples, P*s, sizeof(terarec_t), teraCompare);
         end = MPI_Wtime();
         if(rank ==0) printf("%.6fs.| 4.  Sort samples on root\n", end - start);
         start = MPI_Wtime();
@@ -269,7 +223,7 @@ void terasort(terarec_t *local_data, int  local_len,
     }
     // 5. Broadcast splitters
     start = MPI_Wtime();
-    MPI_Bcast(splitters, s, mpi_terakey_type, 0, MPI_COMM_WORLD);
+    MPI_Bcast(splitters, s, mpi_tera_type, 0, MPI_COMM_WORLD);
     end = MPI_Wtime();
     if(rank ==0) printf("%.6fs.| 6.  Broadcast splitters\n", end - start);
     // 6. Partition using splitters
@@ -347,7 +301,6 @@ void terasort(terarec_t *local_data, int  local_len,
     free(recv_counts);
     free(send_displs);
     free(recv_displs);
-    free(keys_samples);
 
     
     
