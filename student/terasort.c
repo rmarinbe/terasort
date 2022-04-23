@@ -5,6 +5,7 @@
 
 #include "terarec.h"
 #include <math.h>
+#include <stdbool.h>
 
 #define BUCKET_MIN 32032
 #define BUCKET_MAX 80126
@@ -152,6 +153,8 @@ void terasort_bucket(terarec_t *local_data, int  local_len,
     free(recv_displs);
 }
 
+
+/*
 void partition_with_splitters(terarec_t *data, int  dat_len, terarec_t *splitters, int spl_len, int *bkt_counts, int *bkt_displs, int procs) {
 
     int k = 0; // track the splitter num
@@ -165,7 +168,61 @@ void partition_with_splitters(terarec_t *data, int  dat_len, terarec_t *splitter
         ++bkt_counts[k];
     }
 }
+*/
 
+
+
+
+
+
+
+//adpted from source: https://www.geeksforgeeks.org/binary-search/
+int splitter_bsearch(terarec_t *data, terarec_t *splitter, int l, int r)
+{
+    if (r >= l) {
+        int mid = l + (r - l) / 2;
+ 
+
+        bool condition_1 = (teraCompare(data+mid, splitter) >= 0); 
+        bool condition_2 = (mid ==0 || teraCompare(data+mid-1, splitter) < 0); 
+        
+        //splitter found
+        if(condition_1 && condition_2)
+            return mid;
+        //splitter could only be present in left sub data
+        if (condition_1)
+            return splitter_bsearch(data, splitter, l, mid - 1);
+        // Else the splitter could only be present in right sub data
+        return splitter_bsearch(data, splitter, mid + 1, r);
+    }
+    // splitter not present
+    return -1;
+}
+
+
+
+void partition_with_splitters(terarec_t *data, int  dat_len, terarec_t *splitters, int spl_len, int *bkt_counts, int *bkt_displs, int procs) {
+
+    int k = 0; // track the splitter num
+    int found_index;
+    int next_displ = dat_len;
+    bkt_displs[0] = 0;
+
+    for (int i = 0; i < spl_len; i++) {
+        found_index =  splitter_bsearch(data, &splitters[i], 0, dat_len);
+        ++k;
+        bkt_displs[k] = found_index ;
+    }
+
+    for (int i = spl_len; i >= 0; i--)
+    {
+        if(bkt_displs[i] == -1)
+            continue;
+        bkt_counts[i] = next_displ - bkt_displs[i];
+        next_displ = bkt_displs[i];
+    }
+    
+}
 
 void terasort(terarec_t *local_data, int  local_len, 
 			  terarec_t **sorted_data, int* sorted_counts, long* sorted_displs){
@@ -230,7 +287,25 @@ void terasort(terarec_t *local_data, int  local_len,
     start = MPI_Wtime();
     partition_with_splitters(local_data, local_len, splitters, s, all_counts+(P*rank), send_displs, P);
     end = MPI_Wtime();
-    if(rank ==0) printf("%.6fs.| 7.  Partition using splitters\n", end - start);
+    if(rank ==0) printf("%.6fs.| 7.  Partition using splitters bsearch\n", end - start);
+    
+    /*
+    start = MPI_Wtime();
+    partition_with_splitters(local_data, local_len, splitters, s, all_counts+(P*rank), send_displs, P);
+    end = MPI_Wtime();
+    if(rank ==0) printf("%.6fs.| 7.  Partition using splitters old\n", end - start);
+    
+    if(rank==0) {
+    printf("\nPartiions old\n");
+    for (size_t i = 0; i < P; i++)
+    {
+        printf("rank %d displ %d counts %d\n", rank, send_displs[i], all_counts[P*rank+i]); 
+    }
+    }
+    */
+
+
+    
     // 7. Gather all counts
     start = MPI_Wtime();
     MPI_Allgather(MPI_IN_PLACE, 0, MPI_INT, all_counts, P, MPI_INT, MPI_COMM_WORLD);
