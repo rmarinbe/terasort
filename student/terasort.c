@@ -250,8 +250,8 @@ void merge_sort(terarec_t **data, terarec_t **aux, int N, int chunk) {
     for (int i = 0, k=0; i < N; i+= chunk, k++)
     {
         int len = MIN(chunk, N-i);
-	    //qsort(*data+i, len, sizeof(terarec_t), teraCompare);
-        insertion_sort(*data+i, len);
+	    qsort(*data+i, len, sizeof(terarec_t), teraCompare);
+        //insertion_sort(*data+i, len);
         displs[k] = offset;
         offset += len;
     }
@@ -296,8 +296,8 @@ void terasort(terarec_t *local_data, int  local_len,
     if(rank == 0) root_samples = (terakey_t*) malloc(P*s*sizeof(terakey_t));
     // 1. Local Sort
 	//qsort(local_data, local_len, sizeof(terarec_t), teraCompare);
-    //sort_terarec(original_local_data, local_data, aux1, 0, local_len-1, 10);
-    merge_sort(&local_data, &aux1, local_len, 7);
+    //sort_terarec(original_local_data, local_data, aux1, 0, local_len-1, 100);
+    merge_sort(&local_data, &aux1, local_len, 4000);
     end = MPI_Wtime();
     printf("%.6fs.| 1.  Local Sort, rank %d \n", end - start, rank);
 
